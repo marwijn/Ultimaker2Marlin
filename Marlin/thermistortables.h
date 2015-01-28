@@ -4,6 +4,12 @@
 #include "Marlin.h"
 
 #define OVERSAMPLENR 8
+#ifdef HEATER_0_USES_MAX6675
+#define OVERSAMPLENR 64
+#endif
+#ifdef HEATER_0_USES_MAX31855
+#define OVERSAMPLENR 32
+#endif
 
 #if (THERMISTORHEATER_0 == 1) || (THERMISTORHEATER_1 == 1)  || (THERMISTORHEATER_2 == 1) || (THERMISTORBED == 1) //100k bed thermistor
 

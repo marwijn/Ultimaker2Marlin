@@ -117,6 +117,7 @@
 //--NORMAL IS 4.7kohm PULLUP!-- 1kohm pullup can be used on hotend sensor, using correct resistor and table
 //
 //// Temperature sensor settings:
+// -3 is thermocouple with MAX31855 (only for sensor 0)
 // -2 is thermocouple with MAX6675 (only for sensor 0)
 // -1 is thermocouple with AD595
 // 0 is not used
@@ -138,7 +139,7 @@
 // 52 is 200k thermistor - ATC Semitec 204GT-2 (1k pullup)
 // 55 is 100k thermistor - ATC Semitec 104GT-2 (Used in ParCan) (1k pullup)
 
-#define TEMP_SENSOR_0 -2
+#define TEMP_SENSOR_0 -3
 #define TEMP_SENSOR_1 20
 #define TEMP_SENSOR_2 0
 #define TEMP_SENSOR_BED 20
@@ -199,9 +200,9 @@
     //#define  DEFAULT_Kd 114
 
 // Ultimaker2
-    #define  DEFAULT_Kp 10.0
-    #define  DEFAULT_Ki 2.5
-    #define  DEFAULT_Kd 100.0
+    //#define  DEFAULT_Kp 10.0
+    //#define  DEFAULT_Ki 2.5
+    //#define  DEFAULT_Kd 100.0
 
 // Makergear
 //    #define  DEFAULT_Kp 7.0
@@ -212,6 +213,14 @@
 //    #define  DEFAULT_Kp 63.0
 //    #define  DEFAULT_Ki 2.25
 //    #define  DEFAULT_Kd 440
+
+// e3d v6 hotend with 40w cartridge on ultimaker2
+    #define  DEFAULT_Kp 26.82
+    #define  DEFAULT_Ki 2.73
+    #define  DEFAULT_Kd 65.92
+
+
+
 #endif // PIDTEMP
 
 // Bed Temperature Control

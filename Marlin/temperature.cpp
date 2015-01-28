@@ -155,7 +155,11 @@ unsigned long watchmillis[EXTRUDERS] = ARRAY_BY_EXTRUDERS(0,0,0);
 #endif
 	
 #ifdef HEATER_0_USES_MAX6675
-static int read_max6675();
+static float read_max6675();
+#endif
+
+#ifdef HEATER_0_USES_MAX31855
+static float read_max31855();
 #endif
 //===========================================================================
 //=============================   functions      ============================
@@ -413,16 +417,6 @@ void manage_heater()
 
   updateTemperaturesFromRawValues();
 
-  #ifdef HEATER_0_USES_MAX6675
-  if (current_temperature[0] > 1023 || current_temperature[0] > HEATER_0_MAXTEMP)
-  {
-	  max_temp_error(0);
-  }
-  if (current_temperature[0] == 0  || current_temperature[0] < HEATER_0_MINTEMP)
-  {
-	  min_temp_error(0);
-  }
-  #endif
   for(int e = 0; e < EXTRUDERS; e++)
   {
 
@@ -659,10 +653,10 @@ static float analog2temp(int raw, uint8_t e) {
       SERIAL_ERRORLNPGM(" - Invalid extruder number !");
       kill();
   }
-  #ifdef HEATER_0_USES_MAX6675
+#if (defined(HEATER_0_USES_MAX6675) || defined (HEATER_0_USES_MAX31855))
     if (e == 0)
     {
-      return 0.25 * raw;
+      return 0; // should not be used
     }
   #endif
 
@@ -726,13 +720,20 @@ static float analog2tempBed(int raw) {
     and this function is called from normal context as it is too slow to run in interrupts and will block the stepper routine otherwise */
 static void updateTemperaturesFromRawValues()
 {
-#ifdef HEATER_0_USES_MAX6675
-	current_temperature_raw[0] = read_max6675();
-#endif
+
 
     for(uint8_t e=0;e<EXTRUDERS;e++)
     {
         current_temperature[e] = analog2temp(current_temperature_raw[e], e);
+		if (e==0)
+		{
+			#ifdef HEATER_0_USES_MAX6675
+			current_temperature[0] = read_max6675();
+			#endif
+			#ifdef HEATER_0_USES_MAX31855
+			current_temperature[0] = read_max31855();
+			#endif
+		}
     }
     current_temperature_bed = analog2tempBed(current_temperature_bed_raw);
     #ifdef TEMP_SENSOR_1_AS_REDUNDANT
@@ -790,7 +791,7 @@ void tp_init()
     #endif
   #endif
 
-  #ifdef HEATER_0_USES_MAX6675
+#if (defined(HEATER_0_USES_MAX6675) || defined (HEATER_0_USES_MAX31855))
     #ifndef SDSUPPORT
       SET_OUTPUT(MAX_SCK_PIN);
       WRITE(MAX_SCK_PIN,0);
@@ -849,6 +850,7 @@ void tp_init()
   OCR0B = 128;
   TIMSK0 |= (1<<OCIE0B);
 
+#if !(defined HEATER_0_USES_MAX31855 || HEATER_0_USES_MAX6675)
 #ifdef HEATER_0_MINTEMP
   minttemp[0] = HEATER_0_MINTEMP;
   while(analog2temp(minttemp_raw[0], 0) < HEATER_0_MINTEMP) {
@@ -869,6 +871,7 @@ void tp_init()
 #endif
   }
 #endif //MAXTEMP
+#endif
 
 #if (EXTRUDERS > 1) && defined(HEATER_1_MINTEMP)
   minttemp[1] = HEATER_1_MINTEMP;
@@ -1036,10 +1039,10 @@ void bed_max_temp_error(void) {
 long max6675_previous_millis = -MAX6675_HEAT_INTERVAL;
 int max6675_temp = 4000;
 
-static int read_max6675()
+static float read_max6675()
 {
   if (millis() - max6675_previous_millis < MAX6675_HEAT_INTERVAL)
-    return max6675_temp;
+    return max6675_temp * 0.25;
 
   max6675_previous_millis = millis();
   max6675_temp = 0;
@@ -1076,18 +1079,87 @@ static int read_max6675()
 
   if (max6675_temp & 4)
   {
-    // thermocouple open
+   // thermocouple open
+	SERIAL_PROTOCOLPGM("READ Max6675 failure, termocouple open : "); SERIAL_PROTOCOLLN(max6675_temp);
     max6675_temp = 4000;
+    max_temp_error(0);
   }
   else
   {
     max6675_temp = max6675_temp >> 3;
+	if (max6675_temp <= 0) min_temp_error(0);
+  }
+  float real_temp = max6675_temp*0.25;
+
+  if (real_temp >  HEATER_0_MAXTEMP)
+  {
+	max_temp_error(0);
+  }
+  if (real_temp < HEATER_0_MINTEMP)
+  {
+	min_temp_error(0);
   }
 
-  return max6675_temp;
+  return real_temp;
 }
 #endif
 
+
+#ifdef HEATER_0_USES_MAX31855
+
+static float read_max31855()
+{
+  #ifdef	PRR
+    PRR &= ~(1<<PRSPI);
+  #elif defined PRR0
+    PRR0 &= ~(1<<PRSPI);
+  #endif
+
+  SPCR = (1<<MSTR) | (1<<SPE) | (1<<SPR0);
+
+  // enable TT_MAX6675
+  WRITE(MAX6675_SS, 0);
+
+  // ensure 100ns delay - a bit extra is fine
+  asm("nop");//50ns on 20Mhz, 62.5ns on 16Mhz
+  asm("nop");//50ns on 20Mhz, 62.5ns on 16Mhz
+
+  // read MSB
+  SPDR = 0;
+  for (;(SPSR & (1<<SPIF)) == 0;);
+  int temp = SPDR;
+  temp <<= 8;
+
+  // read LSB
+  SPDR = 0;
+  for (;(SPSR & (1<<SPIF)) == 0;);
+  temp |= SPDR;
+
+  // disable TT_MAX6675
+  WRITE(MAX6675_SS, 1);
+
+  if (temp & 1)
+  {
+	//thermocouple read failure
+	SERIAL_PROTOCOLPGM("Error reading MAX31855: "); SERIAL_PROTOCOLLN(temp);
+    max_temp_error(0);
+	return 4000;
+  }
+  temp  >>= 2;
+  float real_temp = temp*0.25;
+
+  if (real_temp >  HEATER_0_MAXTEMP)
+  {
+	max_temp_error(0);
+  }
+  if (real_temp < HEATER_0_MINTEMP)
+  {
+	min_temp_error(0);
+  }
+  return real_temp;
+
+}
+#endif
 
 // Timer 0 is shared with millies
 ISR(TIMER0_COMPB_vect)
@@ -1232,9 +1304,7 @@ ISR(TIMER0_COMPB_vect)
   {
     if (!temp_meas_ready) //Only update the raw values if they have been read. Else we could be updating them during reading.
     {
-#ifndef HEATER_0_USES_MAX6675
-      current_temperature_raw[0] = raw_temp_0_value;
-#endif
+	  current_temperature_raw[0] = raw_temp_0_value;
 #if EXTRUDERS > 1
       current_temperature_raw[1] = raw_temp_1_value;
 #endif
@@ -1259,7 +1329,7 @@ ISR(TIMER0_COMPB_vect)
 #else
     if(current_temperature_raw[0] >= maxttemp_raw[0]) {
 #endif
-#ifndef HEATER_0_USES_MAX6675
+#if !(defined( HEATER_0_USES_MAX6675) || defined (HEATER_0_USES_MAX31855))
        max_temp_error(0);
 #endif
     }
@@ -1268,7 +1338,7 @@ ISR(TIMER0_COMPB_vect)
 #else
     if(current_temperature_raw[0] <= minttemp_raw[0]) {
 #endif
-#ifndef HEATER_0_USES_MAX6675
+#if !(defined( HEATER_0_USES_MAX6675) || defined (HEATER_0_USES_MAX31855))
        min_temp_error(0);
 #endif
     }
